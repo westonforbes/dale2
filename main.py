@@ -22,7 +22,7 @@ monitor_thread.start()
 left_motor = MotorControl(pwm_pin = L_ENA, dir_pin_a = L_IN1, dir_pin_b = L_IN2)
 
 # Test stuff.
-test.test_code(left_motor)
+test.test_code(left_motor, left_encoder)
 
 # Shut down.
 left_encoder.cancel()

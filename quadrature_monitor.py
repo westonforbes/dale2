@@ -27,7 +27,8 @@ class QuadratureEncoder:
         self.lock = threading.Lock()
 
         # Get the initial state of the GPIO pins.
-        self.last_state = (self.pigpio_daemon_connector.read(gpio_b) << 1) | self.pigpio_daemon_connector.read(gpio_a)
+        # self.last_state = (self.pigpio_daemon_connector.read(gpio_b) << 1) | self.pigpio_daemon_connector.read(gpio_a)
+        self.last_state = 0
 
         # Setup calling _callback() when GPIO state changes.
         self.cbA = self.pigpio_daemon_connector.callback(self.gpio_b, pigpio.EITHER_EDGE, self._callback)
