@@ -3,21 +3,21 @@ import threading
 import time
 
 class QuadratureEncoder:
-    def __init__(self, gpioA, gpioB, pigpo_daemon=None):
+    def __init__(self, gpio_a, gpio_b, pigpio_daemon_connector=None):
 
         # Initialize pigpio class instance.
-        self.pigpo_daemon = pigpo_daemon or pigpio.pi()
+        self.pigpio_daemon_connector = pigpio_daemon_connector or pigpio.pi()
 
         # Allow some time for the pigpio daemon to start.
         time.sleep(0.5)
 
         # Check if the pigpio daemon is running.
-        if not self.pigpo_daemon.connected:
+        if not self.pigpio_daemon_connector.connected:
             raise RuntimeError("pigpio daemon not running")
 
         # Set the GPIO pins for the encoder.
-        self.gpioA = gpioA
-        self.gpioB = gpioB
+        self.gpio_b = gpio_b
+        self.gpio_a = gpio_a
 
         # Initialize some variables.
         self.position = 0
@@ -26,94 +26,63 @@ class QuadratureEncoder:
         # Create a lock for thread-safe access to position.
         self.lock = threading.Lock()
 
+        # Get the initial state of the GPIO pins.
+        self.last_state = (self.pigpio_daemon_connector.read(gpio_b) << 1) | self.pigpio_daemon_connector.read(gpio_a)
+
         # Setup calling _callback() when GPIO state changes.
-        self.cbA = self.pigpo_daemon.callback(self.gpioA, pigpio.EITHER_EDGE, self._callback)
-        self.cbB = self.pigpo_daemon.callback(self.gpioB, pigpio.EITHER_EDGE, self._callback)
+        self.cbA = self.pigpio_daemon_connector.callback(self.gpio_b, pigpio.EITHER_EDGE, self._callback)
+        self.cbB = self.pigpio_daemon_connector.callback(self.gpio_a, pigpio.EITHER_EDGE, self._callback)
 
     def _callback(self, gpio, level, tick):
 
-        # Get the current state of both GPIOs.
-        a = self.pigpo_daemon.read(self.gpioA)
-        b = self.pigpo_daemon.read(self.gpioB)
+        # Read the current state of the GPIO pins.
+        a = self.pigpio_daemon_connector.read(self.gpio_b)
+        b = self.pigpio_daemon_connector.read(self.gpio_a)
 
-        # With lock to ensure thread-safe access to position.
+        # Create a new state based on the current GPIO readings.
+        # Bit shift A value to position 1 and B value to position 0.
+        # a=0, b=0 → new_state = 0 (binary 00)
+        # a=0, b=1 → new_state = 1 (binary 01)
+        # a=1, b=0 → new_state = 2 (binary 10)
+        # a=1, b=1 → new_state = 3 (binary 11)
+        new_state = (a << 1) | b
+
+        # Create a mapping table we'll use to determine direction.
+        delta_table = {
+            (0, 1): 1,
+            (1, 3): 1,
+            (3, 2): 1,
+            (2, 0): 1,
+            (1, 0): -1,
+            (3, 1): -1,
+            (2, 3): -1,
+            (0, 2): -1,
+        }
+
+        # Using the thread lock to ensure thread-safe access to position...
         with self.lock:
-
-            # If the GPIO that triggered the callback is A...
-            if gpio == self.gpioA:
-                # If the level is high (1)...
-                if level == 1:
-                    # If B is low (0), increment position; otherwise, decrement.
-                    if b == 0: self.position += 1 
-                    else: -1
             
-            # If the GPIO that triggered the callback is B...
-            elif gpio == self.gpioB:
-                # If the level is high (1)...
-                if level == 1:
-                    # If A is high, increment position; otherwise, decrement.
-                    if a == 1: self.position += 1 
-                    else: -1
+            # Get the direction.
+            delta = delta_table.get((self.last_state, new_state), 0)
+            
+            # Add the direction to the position.
+            self.position += delta
+            
+            # Update the last state.
+            self.last_state = new_state
 
     def get_position(self):
+        # Return the current position in a thread-safe manner.
         with self.lock:
             return self.position
 
     def reset(self):
+        # Reset the position to zero in a thread-safe manner.
         with self.lock:
             self.position = 0
 
     def cancel(self):
+        # Cancel the callbacks and stop the pigpio daemon.
         self.cbA.cancel()
         self.cbB.cancel()
-        self.pigpo_daemon.stop()
-
-
-# Background thread for monitoring
-def monitor_encoder(encoder):
-    while True:
-        pos = encoder.get_position()
-        print(f"Encoder Position: {pos}")
-        time.sleep(0.1)  # Adjust as needed for sampling rate
-
-
-if __name__ == "__main__":
-    # Use GPIO17 and GPIO27 for encoder A and B
-    encoder = QuadratureEncoder(gpioA=17, gpioB=27)
-
-    try:
-        # Start monitoring in a background thread
-        monitor_thread = threading.Thread(target=monitor_encoder, args=(encoder,), daemon=True)
-        monitor_thread.start()
-
-        # Main thread continues doing other tasks
-        # GPIO pin definitions
-        L_ENA = 18  # PWM pin (GPIO18, Physical pin 12)
-        L_IN1 = 24  # Direction pin
-        L_IN2 = 25  # Direction pin
-
-        from motor_control import MotorControl
-
-        left_motor = MotorControl(pwm_pin = L_ENA, dir_pin_a = L_IN1, dir_pin_b = L_IN2)
-
-
-        print("Starting left motor at 70% speed in forward direction")
-        left_motor.set_speed(speed = 70, direction = 'forward')
-
-        print("Waiting for 5 seconds...")
-        time.sleep(5)
-
-        print("Starting left motor at 70% speed in backward direction")
-        left_motor.set_speed(speed = 70, direction = 'backward')
-
-        print("Waiting for 5 seconds...")
-        time.sleep(5)
-
-        print("Stopping left motor")
-        left_motor.set_speed(speed = 0, direction = 'backward')
-
-    except KeyboardInterrupt:
-        print("Shutting down.")
-    finally:
-        print("Shutting down.")
-        encoder.cancel()
+        self.pigpio_daemon_connector.stop()

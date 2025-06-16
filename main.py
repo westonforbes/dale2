@@ -1,20 +1,28 @@
-import time
+from quadrature_monitor import QuadratureEncoder
+from motor_control import MotorControl
+import monitor
+import test
+import threading
 
 # GPIO pin definitions
-L_ENA = 18  # PWM pin (GPIO18, Physical pin 12)
+L_ENA = 18  # PWM pin
 L_IN1 = 24  # Direction pin
 L_IN2 = 25  # Direction pin
+L_PHASE_A = 17  # Encoder A pin
+L_PHASE_B = 27  # Encoder B pin
 
-from motor_control import MotorControl
+# Use GPIO17 and GPIO27 for encoder A and B.
+left_encoder = QuadratureEncoder(gpio_a=L_PHASE_A, gpio_b=L_PHASE_B)
 
+# Start monitoring in a background thread.
+monitor_thread = threading.Thread(target=monitor.monitor_encoder, args=(left_encoder,), daemon=True)
+monitor_thread.start()
+
+# Initialize the motor control for the left motor.
 left_motor = MotorControl(pwm_pin = L_ENA, dir_pin_a = L_IN1, dir_pin_b = L_IN2)
 
+# Test stuff.
+test.test_code(left_motor)
 
-print("Starting left motor at 70% speed in forward direction")
-left_motor.set_speed(speed = 70, direction = 'forward')
-
-print("Waiting for 5 seconds...")
-time.sleep(5)
-
-print("Stopping left motor")
-left_motor.set_speed(speed = 0, direction = 'backward')
+# Shut down.
+left_encoder.cancel()
